@@ -65,24 +65,6 @@ export abstract class Tests {
     });
 
     let testSuite: TestSuiteInfo = await this.getBaseTestSuite(tests);
-
-    // Sort the children of each test suite based on their location in the test tree.
-    (testSuite.children as Array<TestSuiteInfo>).forEach((suite: TestSuiteInfo) => {
-      // NOTE: This will only sort correctly if everything is nested at the same
-      // level, e.g. 111, 112, 121, etc. Once a fourth level of indentation is
-      // introduced, the location is generated as e.g. 1231, which won't
-      // sort properly relative to everything else.
-      (suite.children as Array<TestInfo>).sort((a: TestInfo, b: TestInfo) => {
-        if ((a as TestInfo).type === "test" && (b as TestInfo).type === "test") {
-          let aLocation: number = this.getTestLocation(a as TestInfo);
-          let bLocation: number = this.getTestLocation(b as TestInfo);
-          return aLocation - bLocation;
-        } else {
-          return 0;
-        }
-      })
-    });
-
     this.testSuite = testSuite;
 
     return Promise.resolve<TestSuiteInfo>(testSuite);
@@ -161,20 +143,59 @@ export abstract class Tests {
   }
 
   /**
+   * 
+   * @param suite A TestSuiteInfo obejct which children needds to be sorted.
+   */
+  protected sortChildren(suite: TestSuiteInfo) {
+    if(!suite.children && typeof suite.children[Symbol.iterator] === 'function') return;
+    
+    if (suite.children.some(x => x.type === "test")) {
+      suite.children = this.sortTestsChildren(suite.children as Array<TestInfo>);
+      return;
+    } 
+   
+    suite.children = this.sortTestSuiteChildren(suite.children as Array<TestSuiteInfo>);
+    suite.children.forEach(t => this.sortChildren(t as TestSuiteInfo));
+  }
+
+  /**
+   * 
+   * @param testChildren An array of TestInfo objects, general the childeren of a suite if it is a file
+   * @returns The input array, sorted by location
+   */
+  protected sortTestsChildren(testChildren: Array<TestInfo>): Array<TestInfo> {
+    testChildren = testChildren.sort((a: TestInfo, b: TestInfo) => {
+      if ((a as TestInfo).type === "test" && (b as TestInfo).type === "test") {
+        let aLocation: number = this.getTestLocation(a as TestInfo);
+        let bLocation: number = this.getTestLocation(b as TestInfo);
+        return aLocation - bLocation;
+      } else {
+        return 0;
+      }
+    });
+
+    return testChildren;
+  }
+
+  /**
    * Sorts an array of TestSuiteInfo objects by label.
    *
    * @param testSuiteChildren An array of TestSuiteInfo objects, generally the children of another TestSuiteInfo object.
    * @return The input array, sorted by label.
    */
   protected sortTestSuiteChildren(testSuiteChildren: Array<TestSuiteInfo>): Array<TestSuiteInfo> {
+    if(!testSuiteChildren) return [];
+
     testSuiteChildren = testSuiteChildren.sort((a: TestSuiteInfo, b: TestSuiteInfo) => {
-      let comparison = 0;
+      if(a.label.endsWith(".rb")) return 1;
+
       if (a.label > b.label) {
-        comparison = 1;
+        return -1;
       } else if (a.label < b.label) {
-        comparison = -1;
+        return 1;
       }
-      return comparison;
+
+      return 0;
     });
 
     return testSuiteChildren;
@@ -184,7 +205,7 @@ export abstract class Tests {
    * Get the tests in a given file.
    */
   public getTestSuiteForFile(
-    { tests, currentFile, directory }: {
+    { tests, currentFile, label }: {
       tests: Array<{
         id: string;
         full_description: string;
@@ -192,7 +213,7 @@ export abstract class Tests {
         file_path: string;
         line_number: number;
         location: number;
-      }>; currentFile: string; directory?: string;
+      }>; currentFile: string; label?: string;
     }): TestSuiteInfo {
     let currentFileTests = tests.filter(test => {
       return test.file_path === currentFile
@@ -204,13 +225,7 @@ export abstract class Tests {
       test.label = '';
     });
 
-    let currentFileLabel = '';
-
-    if (directory) {
-      currentFileLabel = currentFile.replace(`${this.getTestDirectory()}${directory}/`, '');
-    } else {
-      currentFileLabel = currentFile.replace(`${this.getTestDirectory()}`, '');
-    }
+    let currentFileLabel = label || currentFile.split("/").slice(-1)[0];
 
     let pascalCurrentFileLabel = this.snakeToPascalCase(currentFileLabel.replace('_spec.rb', ''));
 
@@ -250,7 +265,8 @@ export abstract class Tests {
         label: description,
         file: filePath,
         // Line numbers are 0-indexed
-        line: test.line_number - 1
+        line: test.line_number - 1,
+        tooltip: description
       }
 
       return testInfo;
@@ -263,7 +279,8 @@ export abstract class Tests {
       id: currentFile,
       label: currentFileLabel,
       file: currentFileAsAbsolutePath,
-      children: currentFileTestInfoArray
+      children: currentFileTestInfoArray,
+      tooltip: currentFile.replace(this.getTestDirectory(), '')
     }
 
     return currentFileTestSuite;
@@ -289,62 +306,103 @@ export abstract class Tests {
 
     // Create an array of all test files and then abuse Sets to make it unique.
     let uniqueFiles = [...new Set(tests.map((test: { file_path: string; }) => test.file_path))];
+    let groupSubfolders = vscode.workspace.getConfiguration('rubyTestExplorer', null).get('groupSubfolders')
+    if(groupSubfolders) {
+      this.groupTestsByFolder(rootTestSuite, tests, uniqueFiles)
+    } else {
+      this.groupTestsByFirstFolder(rootTestSuite, tests, uniqueFiles)
+    }
 
-    let splitFilesArray: Array<string[]> = [];
-
-    // Remove the spec/ directory from all the file path.
-    uniqueFiles.forEach((file) => {
-      splitFilesArray.push(file.replace(`${this.getTestDirectory()}`, "").split('/'));
-    });
-
-    // This gets the main types of tests, e.g. features, helpers, models, requests, etc.
-    let subdirectories: Array<string> = [];
-    splitFilesArray.forEach((splitFile) => {
-      if (splitFile.length > 1) {
-        subdirectories.push(splitFile[0]);
-      }
-    });
-    subdirectories = [...new Set(subdirectories)];
-
-    // A nested loop to iterate through the direct subdirectories of spec/ and then
-    // organize the files under those subdirectories.
-    subdirectories.forEach((directory) => {
-      let filesInDirectory: Array<TestSuiteInfo> = [];
-
-      let uniqueFilesInDirectory: Array<string> = uniqueFiles.filter((file) => {
-        return file.startsWith(`${this.getTestDirectory()}${directory}/`);
-      });
-
-      // Get the sets of tests for each file in the current directory.
-      uniqueFilesInDirectory.forEach((currentFile: string) => {
-        let currentFileTestSuite = this.getTestSuiteForFile({ tests, currentFile, directory });
-        filesInDirectory.push(currentFileTestSuite);
-      });
-
-      let directoryTestSuite: TestSuiteInfo = {
-        type: 'suite',
-        id: directory,
-        label: directory,
-        children: filesInDirectory
-      };
-
-      rootTestSuite.children.push(directoryTestSuite);
-    });
-
-    // Sort test suite types alphabetically.
-    rootTestSuite.children = this.sortTestSuiteChildren(rootTestSuite.children as Array<TestSuiteInfo>);
-
-    // Get files that are direct descendants of the spec/ directory.
-    let topDirectoryFiles = uniqueFiles.filter((filePath) => {
-      return filePath.replace(`${this.getTestDirectory()}`, "").split('/').length === 1;
-    });
-
-    topDirectoryFiles.forEach((currentFile) => {
-      let currentFileTestSuite = this.getTestSuiteForFile({ tests, currentFile });
-      rootTestSuite.children.push(currentFileTestSuite);
-    });
-
+    // Sort all
+    this.sortChildren(rootTestSuite);
     return rootTestSuite;
+  }
+
+  /** Group tests by first folder in root
+
+    * @param root root TestSuiteInfo
+    * @param allTests Array of all tests
+    * @param uniqueTestPaths Array of unique test paths
+    * @return void
+    */
+  private groupTestsByFirstFolder(root: TestSuiteInfo, allTests: any[], uniqueTestPaths: string[]): void {
+    uniqueTestPaths.forEach(filePath => {
+
+      // Remove the spec/ directory from the file path.
+      let relFilePath = filePath.replace(`${this.getTestDirectory()}`, "");
+
+      // Path of file without folder
+      const file = relFilePath.indexOf('/') == -1 ? relFilePath : relFilePath.slice(relFilePath.indexOf('/') + 1);
+      // first folder of file or undefined (= root)
+      const folder =  relFilePath.indexOf('/') == -1 ? undefined : relFilePath.slice(0, relFilePath.indexOf('/'));
+
+      let child = root.children.find((c: any) => c.id === folder) as TestSuiteInfo;
+      if (!child && folder) {
+        // Create folder if not exists
+        child = {
+          type: 'suite',
+          id: folder,
+          label: folder,
+          children: [],
+          tooltip: folder
+        };
+        root.children.push(child);
+      }
+
+      // If no folder, use root
+      if(!folder) {
+        child = root;
+      }
+
+      // Add file to folder
+      let currentFileTestSuite = this.getTestSuiteForFile({ tests: allTests, currentFile: filePath, label: file });
+      child.children.push(currentFileTestSuite);
+    });
+  }
+
+    /** Group tests by all folders
+
+    * @param root root TestSuiteInfo
+    * @param allTests Array of all tests
+    * @param uniqueTestPaths Array of unique test paths
+    * @return void
+    */
+  private groupTestsByFolder(root: TestSuiteInfo, allTests: any[], uniqueTestPaths: string[]): void {
+    uniqueTestPaths.forEach(filePath => {
+
+      // Remove the spec/ directory from the file path.
+      let relFilePath = filePath.replace(`${this.getTestDirectory()}`, "");
+      let splitted = relFilePath.split("/");
+
+      splitted.reduce((r: any, label: string, i: number, a: Array<string>) => {
+        // Create path to current folder/file
+        let currentPath = a.slice(0, i + 1).join("/");
+        // Add full path to current folder/file
+        let fullPath = `${this.getTestDirectory()}${currentPath}`;
+        let child = r.children.find((c: any) => c.id === fullPath);
+
+        // Folder already exist, navigate into folder
+        if(child) return child;
+
+        // If parts is the file part
+        if(a.length - 1 === i) {
+          let currentFile = `${this.getTestDirectory()}${currentPath}`;
+          let currentFileTestSuite = this.getTestSuiteForFile({ tests: allTests, currentFile: currentFile });
+          r.children.push(currentFileTestSuite);
+          return;
+        } else {
+          // Create folder
+          let dir = { type: 'suite',
+            id: `${this.getTestDirectory()}${currentPath}`,
+            label,
+            children: [],
+            tooltip: currentPath
+          };
+          r.children.push(dir);
+          return dir;
+        }
+      }, root);
+    });
   }
 
   /**
@@ -401,7 +459,7 @@ export abstract class Tests {
    */
   runTests = async (tests: string[], debuggerConfig?: vscode.DebugConfiguration): Promise<void> => {
     let testSuite: TestSuiteInfo = await this.tests();
-
+    this.log.debug("-------", tests)
     for (const suiteOrTestId of tests) {
       const node = this.findNode(testSuite, suiteOrTestId);
       if (node) {

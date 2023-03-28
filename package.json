@@ -158,6 +158,12 @@
           "default": "rdebug-ide",
           "type": "string",
           "scope": "resource"
+        },
+        "rubyTestExplorer.groupSubfolders": {
+          "markdownDescription": "Tests nested in subfolders are also displayed as subfolder",
+          "default": false,
+          "type": "boolean",
+          "scope": "resource"
         }
       }
     }

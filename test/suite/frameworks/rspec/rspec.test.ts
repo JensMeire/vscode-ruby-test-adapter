@@ -30,12 +30,14 @@ suite('Extension Test for RSpec', () => {
             file: path.resolve(dirPath, "spec/abs_spec.rb"),
             id: "./spec/abs_spec.rb",
             label: "abs_spec.rb",
+            tooltip: "abs_spec.rb",
             type: "suite",
             children: [
               {
                 file: path.resolve(dirPath, "spec/abs_spec.rb"),
                 id: "./spec/abs_spec.rb[1:1]",
                 label: "finds the absolute value of 1",
+                tooltip: "finds the absolute value of 1",
                 line: 3,
                 type: "test"
               },
@@ -43,6 +45,7 @@ suite('Extension Test for RSpec', () => {
                 file: path.resolve(dirPath, "spec/abs_spec.rb"),
                 id: "./spec/abs_spec.rb[1:2]",
                 label: "finds the absolute value of 0",
+                tooltip: "finds the absolute value of 0",
                 line: 7,
                 type: "test"
               },
@@ -50,6 +53,7 @@ suite('Extension Test for RSpec', () => {
                 file: path.resolve(dirPath, "spec/abs_spec.rb"),
                 id: "./spec/abs_spec.rb[1:3]",
                 label: "finds the absolute value of -1",
+                tooltip: "finds the absolute value of -1",
                 line: 11,
                 type: "test"
               }
@@ -59,12 +63,14 @@ suite('Extension Test for RSpec', () => {
             file: path.resolve(dirPath, "spec/square_spec.rb"),
             id: "./spec/square_spec.rb",
             label: "square_spec.rb",
+            tooltip: "square_spec.rb",
             type: "suite",
             children: [
               {
                 file: path.resolve(dirPath, "spec/square_spec.rb"),
                 id: "./spec/square_spec.rb[1:1]",
                 label: "finds the square of 2",
+                tooltip: "finds the square of 2",
                 line: 3,
                 type: "test"
               },
@@ -72,6 +78,7 @@ suite('Extension Test for RSpec', () => {
                 file: path.resolve(dirPath, "spec/square_spec.rb"),
                 id: "./spec/square_spec.rb[1:2]",
                 label: "finds the square of 3",
+                tooltip: "finds the square of 3",
                 line: 7,
                 type: "test"
               }
